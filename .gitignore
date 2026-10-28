@@ -7,7 +7,10 @@ __pycache__/
 
 # Artefactos de entrenamiento
 model_episode_*.pt
-/runs/
+/runs/*
+!/runs/*/
+/runs/*/*
+!/runs/*/model.pt
 
 # Dependencias de Node
 web/node_modules/

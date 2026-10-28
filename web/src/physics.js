@@ -117,10 +117,6 @@ export class RocketSimulation {
         && Math.abs(s.angularVelocity) <= 0.35;
       this.outcome = safe ? 'LANDED' : 'CRASHED';
       this.lastReward = safe ? 100 : -100;
-    } else if (['xy', 'xy-angle'].includes(this.mode)
-      && (Math.abs(s.x - this.padX) > 8 || s.y > 14)) {
-      this.outcome = 'CRASHED';
-      this.lastReward = -100;
     } else if (this.steps >= MAX_STEPS) {
       this.outcome = 'TIMEOUT';
     }

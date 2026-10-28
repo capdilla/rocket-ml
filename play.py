@@ -106,8 +106,6 @@ def main():
     small = pygame.font.SysFont("monospace", 15)
 
     env = RocketEnv(seed=args.seed,
-                    max_horizontal_distance=8.0 if args.mode in ("xy", "xy-angle") else None,
-                    max_height=14.0 if args.mode in ("xy", "xy-angle") else None,
                     gravity=EARTH_GRAVITY if args.planet == "earth" else GRAVITY,
                     engine_accel=EARTH_ENGINE_ACCEL if args.planet == "earth" else ENGINE_ACCEL)
     pad_random = random.Random(args.seed)

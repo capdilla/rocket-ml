@@ -30,6 +30,7 @@ app.innerHTML = `
           <div class="instrument position"><span><span class="desktop-label">X POSITION</span><span class="hud-label">POS. X</span></span><strong id="position-x">+0.00 <small>m</small></strong><div class="position-detail">TARGET <span id="target-x">+0.00 m</span></div></div>
         </div>
         <div class="mobile-play-panel">
+          <button type="button" id="mobile-ai" class="ai-bar">✧ &nbsp; AI PILOT</button>
           <div class="touch-controls" role="group" aria-label="Touch flight controls">
             <button type="button" class="touch-button lateral" data-control="lateralLeft" aria-label="Left lateral thruster"><span aria-hidden="true">⇤</span><small>LATERAL</small></button>
             <button type="button" class="touch-button" data-control="left" aria-label="Rotate left"><span aria-hidden="true">↶</span><small>ROTATE</small></button>
@@ -41,7 +42,6 @@ app.innerHTML = `
             <button type="button" id="mobile-restart">REPEAT</button>
             <button type="button" id="mobile-new-flight">NEW FLIGHT</button>
             <button type="button" id="mobile-pause">PAUSE</button>
-            <button type="button" id="mobile-ai">AI</button>
           </div>
         </div>
       </section>
@@ -99,8 +99,10 @@ function createHoldAudio(path, volume) {
 function syncAudio() {
   const running = !paused && !sim.finished && !document.hidden;
   const lateral = Number(held.has('lateralRight')) - Number(held.has('lateralLeft'));
-  setEngineAudio(running && held.has('engine'));
-  setLateralAudio(running && lateral !== 0);
+  const engineOn = held.has('engine') || (aiEnabled && sim.lastInput.engine);
+  const lateralOn = lateral !== 0 || (aiEnabled && sim.lastInput.lateral !== 0);
+  setEngineAudio(running && engineOn);
+  setLateralAudio(running && lateralOn);
 }
 
 const scene = new THREE.Scene();
@@ -128,7 +130,8 @@ function line(points, color, width = 1, opacity = 1) {
 }
 
 // Fixed scenery lives in world metres, with the same x/y frame as play.py.
-scene.add(shape([[-30, -3], [30, -3], [30, -0.035], [-30, -0.035]], 0x0d1d2b, -2));
+const ground = shape([[-30, -3], [30, -3], [30, -0.035], [-30, -0.035]], 0x0d1d2b, -2);
+scene.add(ground);
 scene.add(line([[-30, 0, -1], [30, 0, -1]], 0x335470));
 for (let x = -28; x <= 28; x += 2) {
   scene.add(line([[x, -0.12, -0.9], [x, -0.38, -0.9]], 0x2d455c));
@@ -149,6 +152,149 @@ for (let i = 0; i < 90; i++) {
 }
 scene.add(stars);
 
+function planetTexture(draw, size = 512) {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  draw(ctx, size);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+function makeRng(seed) {
+  let value = seed >>> 0;
+  return () => { value = (value * 1664525 + 1013904223) >>> 0; return value / 4294967296; };
+}
+
+function earthTexture() {
+  return planetTexture((ctx, s) => {
+    const rnd = makeRng(881);
+    const ocean = ctx.createLinearGradient(0, 0, 0, s);
+    ocean.addColorStop(0, '#2a6db0');
+    ocean.addColorStop(0.55, '#1f5f9c');
+    ocean.addColorStop(1, '#163f6d');
+    ctx.fillStyle = ocean;
+    ctx.fillRect(0, 0, s, s);
+    for (let i = 0; i < 9; i++) {
+      const cx = rnd() * s;
+      const cy = rnd() * s;
+      const base = 35 + rnd() * 75;
+      ctx.fillStyle = rnd() > 0.3 ? '#3e8a4e' : '#a5823f';
+      ctx.beginPath();
+      for (let a = 0; a <= Math.PI * 2 + 0.1; a += 0.35) {
+        const r = base * (0.62 + rnd() * 0.55);
+        const x = cx + Math.cos(a) * r;
+        const y = cy + Math.sin(a) * r * 0.78;
+        a === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.fillStyle = 'rgba(255,255,255,0.42)';
+    for (let i = 0; i < 60; i++) {
+      const cx = rnd() * s;
+      const cy = rnd() * s;
+      const r = 6 + rnd() * 26;
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  });
+}
+
+function makePlanet(radius, texture, glowColor) {
+  const group = new THREE.Group();
+  group.add(new THREE.Mesh(new THREE.SphereGeometry(radius, 64, 48), new THREE.MeshBasicMaterial({ map: texture })));
+  group.add(new THREE.Mesh(
+    new THREE.SphereGeometry(radius * 1.12, 64, 48),
+    new THREE.MeshBasicMaterial({ color: glowColor, transparent: true, opacity: 0.18, side: THREE.BackSide, depthWrite: false }),
+  ));
+  return group;
+}
+
+const earthPlanet = makePlanet(7, earthTexture(), 0x7fc4ff);
+scene.add(earthPlanet);
+
+const sun = new THREE.Mesh(new THREE.CircleGeometry(1.4, 40), new THREE.MeshBasicMaterial({ color: 0xfff4c2, transparent: true, opacity: 0.95 }));
+sun.position.set(6, 11, -24);
+scene.add(sun);
+
+const cloudGroup = new THREE.Group();
+const cloudRng = makeRng(559);
+for (let i = 0; i < 6; i++) {
+  const cloud = new THREE.Group();
+  const puffs = 3 + Math.floor(cloudRng() * 3);
+  for (let j = 0; j < puffs; j++) {
+    const puff = new THREE.Mesh(new THREE.CircleGeometry(0.7 + cloudRng() * 0.8, 20), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.35 + cloudRng() * 0.2 }));
+    puff.position.set((cloudRng() - 0.5) * 2.2, (cloudRng() - 0.5) * 0.7, 0);
+    cloud.add(puff);
+  }
+  cloud.position.set((cloudRng() - 0.5) * 22, 3 + cloudRng() * 9, -23);
+  cloudGroup.add(cloud);
+}
+scene.add(cloudGroup);
+
+function ellipseShape(rx, ry) {
+  const s = new THREE.Shape();
+  const seg = 26;
+  for (let i = 0; i <= seg; i++) {
+    const a = (i / seg) * Math.PI * 2;
+    const x = Math.cos(a) * rx;
+    const y = Math.sin(a) * ry;
+    i === 0 ? s.moveTo(x, y) : s.lineTo(x, y);
+  }
+  s.closePath();
+  return s;
+}
+
+const lunarGround = new THREE.Group();
+lunarGround.add(shape([[-30, -3], [30, -3], [30, -0.035], [-30, -0.035]], 0x9299a0, -2));
+const surfaceRng = makeRng(903);
+for (let i = 0; i < 15; i++) {
+  const cx = (surfaceRng() - 0.5) * 56;
+  const cy = -0.55 - surfaceRng() * 2.3;
+  const rx = 0.35 + surfaceRng() * 1.1;
+  const ry = rx * (0.3 + surfaceRng() * 0.22);
+  const rim = new THREE.Mesh(new THREE.ShapeGeometry(ellipseShape(rx * 1.2, ry * 1.2)), new THREE.MeshBasicMaterial({ color: 0xb0b6bb, side: THREE.DoubleSide }));
+  rim.position.set(cx, cy, -1.9);
+  lunarGround.add(rim);
+  const crater = new THREE.Mesh(new THREE.ShapeGeometry(ellipseShape(rx, ry)), new THREE.MeshBasicMaterial({ color: 0x6b7178, side: THREE.DoubleSide }));
+  crater.position.set(cx, cy - ry * 0.15, -1.85);
+  lunarGround.add(crater);
+}
+for (let i = 0; i < 10; i++) {
+  const rock = shape([[-0.12, 0], [0.12, 0], [0.09, 0.16], [0, 0.24], [-0.09, 0.16]], 0x7c838a, -1.7);
+  rock.position.set((surfaceRng() - 0.5) * 56, -0.12 - surfaceRng() * 2.7, 0);
+  lunarGround.add(rock);
+}
+scene.add(lunarGround);
+
+function setPlanetVisual(planet) {
+  const viewport = $('#viewport');
+  if (planet === 'earth') {
+    viewport.style.background = 'linear-gradient(180deg, #3f8fd0 0%, #6fb3e6 55%, #d9edf8 100%)';
+    stars.visible = false;
+    earthPlanet.visible = false;
+    sun.visible = true;
+    cloudGroup.visible = true;
+    ground.visible = true;
+    ground.material.color.set(0x3a5233);
+    lunarGround.visible = false;
+  } else {
+    viewport.style.background = 'radial-gradient(circle at 50% 55%, #17334a 0, #0d2337 44%, #071828 100%)';
+    stars.visible = true;
+    earthPlanet.visible = true;
+    earthPlanet.scale.setScalar(0.38);
+    earthPlanet.position.set(6, 10.5, -20);
+    sun.visible = false;
+    cloudGroup.visible = false;
+    ground.visible = false;
+    lunarGround.visible = true;
+  }
+}
+setPlanetVisual(sim.planet);
+
 const pad = new THREE.Group();
 pad.add(shape([[-PAD_HALF_WIDTH, -0.04], [PAD_HALF_WIDTH, -0.04], [PAD_HALF_WIDTH, 0.08], [-PAD_HALF_WIDTH, 0.08]], 0x59e5af, 1));
 pad.add(shape([[-PAD_HALF_WIDTH - 0.13, -0.13], [PAD_HALF_WIDTH + 0.13, -0.13], [PAD_HALF_WIDTH + 0.13, -0.04], [-PAD_HALF_WIDTH - 0.13, -0.04]], 0x256955, 0.5));
@@ -156,14 +302,23 @@ pad.add(line([[0, 0.08, -0.2], [0, 14, -0.2]], 0x6ae7bd, 1, 0.22));
 scene.add(pad);
 
 const rocket = new THREE.Group();
-rocket.add(shape([[-0.24, 0.08], [0.24, 0.08], [0.22, 0.86], [0, 1.30], [-0.22, 0.86]], 0xeaf3fa, 2));
-rocket.add(shape([[-0.22, 0.85], [0, 1.30], [0.22, 0.85]], 0xf18c5d, 2.2));
-rocket.add(shape([[-0.28, 0.14], [0.28, 0.14], [0.22, 0.38], [-0.22, 0.38]], 0x92b9cc, 2.1));
-rocket.add(shape([[-0.20, 0.28], [-0.57, 0.03], [-0.46, 0.03], [-0.18, 0.17]], 0x91a9bf, 1.9));
-rocket.add(shape([[0.20, 0.28], [0.57, 0.03], [0.46, 0.03], [0.18, 0.17]], 0x91a9bf, 1.9));
-rocket.add(shape([[-0.68, 0.015], [-0.42, 0.015], [-0.42, 0.07], [-0.68, 0.07]], 0x91a9bf, 2));
-rocket.add(shape([[0.42, 0.015], [0.68, 0.015], [0.68, 0.07], [0.42, 0.07]], 0x91a9bf, 2));
-const windowMesh = new THREE.Mesh(new THREE.CircleGeometry(0.115, 24), new THREE.MeshBasicMaterial({ color: 0x3ac6f2 }));
+function expandPoints(points, factor) {
+  const cx = points.reduce((sum, p) => sum + p[0], 0) / points.length;
+  const cy = points.reduce((sum, p) => sum + p[1], 0) / points.length;
+  return points.map(([x, y]) => [cx + (x - cx) * factor, cy + (y - cy) * factor]);
+}
+function rocketPart(points, color, z) {
+  rocket.add(shape(expandPoints(points, 1.16), 0x0a1622, z - 0.35));
+  rocket.add(shape(points, color, z));
+}
+rocketPart([[-0.24, 0.08], [0.24, 0.08], [0.22, 0.86], [0, 1.30], [-0.22, 0.86]], 0xf2f6f9, 2);
+rocketPart([[-0.22, 0.85], [0, 1.30], [0.22, 0.85]], 0xff5a2e, 2.2);
+rocketPart([[-0.28, 0.14], [0.28, 0.14], [0.22, 0.38], [-0.22, 0.38]], 0xff5a2e, 2.1);
+rocketPart([[-0.20, 0.28], [-0.57, 0.03], [-0.46, 0.03], [-0.18, 0.17]], 0xf2f6f9, 1.9);
+rocketPart([[0.20, 0.28], [0.57, 0.03], [0.46, 0.03], [0.18, 0.17]], 0xf2f6f9, 1.9);
+rocketPart([[-0.68, 0.015], [-0.42, 0.015], [-0.42, 0.07], [-0.68, 0.07]], 0xf2f6f9, 2);
+rocketPart([[0.42, 0.015], [0.68, 0.015], [0.68, 0.07], [0.42, 0.07]], 0xf2f6f9, 2);
+const windowMesh = new THREE.Mesh(new THREE.CircleGeometry(0.115, 24), new THREE.MeshBasicMaterial({ color: 0x1f4d66 }));
 windowMesh.position.set(0, 0.72, 2.4);
 rocket.add(windowMesh);
 const mainFlame = shape([[-0.12, 0.07], [0.12, 0.07], [0, -0.61]], 0xffb05a, 1.8);
@@ -234,6 +389,8 @@ function updateHud() {
   }
   $('#pause').innerHTML = awaitingStart ? '▶ &nbsp; START SIMULATION' : paused ? '▶ &nbsp; RESUME SIMULATION' : 'Ⅱ &nbsp; PAUSE SIMULATION';
   $('#mobile-pause').textContent = awaitingStart ? 'START' : paused ? 'RESUME' : 'PAUSE';
+  $('#mobile-ai').classList.toggle('ai-active', aiEnabled);
+  $('#mobile-ai').innerHTML = aiEnabled ? '✧ &nbsp; AI PILOT — ON' : '✧ &nbsp; AI PILOT';
 }
 
 function resetTrail() {
@@ -261,6 +418,7 @@ function setPlanet(planet) {
     button.classList.toggle('active', active);
     button.setAttribute('aria-pressed', String(active));
   });
+  setPlanetVisual(planet);
   restart(false);
 }
 
@@ -461,18 +619,18 @@ async function render(time) {
   const elapsed = Math.min((time - previousTime) / 1000, 0.1);
   previousTime = time;
   if (!paused && !sim.finished) {
-    let controls;
-    if (aiEnabled && pilot.ready) {
-      try {
-        controls = await pilot.selectAction(sim);
-      } catch {
-        controls = manualControls();
-      }
-    } else {
-      controls = manualControls();
-    }
     accumulator += elapsed;
+    const manual = manualControls();
     while (accumulator >= DT && !sim.finished) {
+      let controls = manual;
+      // La IA se entrenó decidiendo en cada paso de física, no una vez por frame.
+      if (aiEnabled && pilot.ready) {
+        try {
+          controls = await pilot.selectAction(sim);
+        } catch {
+          controls = manual;
+        }
+      }
       sim.step(controls);
       accumulator -= DT;
     }

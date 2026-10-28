@@ -26,15 +26,15 @@ class RecoveryStart:
 def load_recovery_starts(paths: list[Path], step: int | None = None,
                          gravity: float | None = GRAVITY,
                          engine_accel: float = ENGINE_ACCEL) -> list[RecoveryStart]:
-    """Choose AI handovers, or an explicit step, from each XY-angle log.
+    """Choose AI handovers, or an explicit step, from each play log (any mode).
 
     Pass ``gravity=None`` to accept logs from any planet (mixed-planet training).
     """
     starts = []
     for path in paths:
         episode = load_play_episode(path)
-        if episode["mode"] != "xy-angle":
-            raise ValueError(f"{path} is not an xy-angle flight")
+        if episode["mode"] not in ("y", "xy", "xy-angle", "full"):
+            raise ValueError(f"{path} has an unknown flight mode")
         if gravity is not None and (
                 not math.isclose(episode["gravity"], gravity, rel_tol=1e-9)
                 or not math.isclose(episode["engine_accel"], engine_accel, rel_tol=1e-9)):
