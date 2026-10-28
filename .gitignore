@@ -1,0 +1,16 @@
+# Entorno virtual
+.venv/
+
+# Caché de Python
+__pycache__/
+*.py[cod]
+
+# Artefactos de entrenamiento
+model_episode_*.pt
+/runs/
+
+# Dependencias de Node
+web/node_modules/
+
+# macOS
+.DS_Store

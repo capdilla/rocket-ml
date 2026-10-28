@@ -1,0 +1,10 @@
+{
+  "name": "rocket-lab-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun serve.js",
+    "start": "bun serve.js",
+    "test": "bun test"
+  }
+}
